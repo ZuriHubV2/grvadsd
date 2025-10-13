@@ -1,5 +1,5 @@
--- Client: Replace a rendered animal (carpet or fallback) with Strawberry Elephant and make it walk Start->End
--- Author: adapted for user's Steal a Brainrot setup
+-- 🍓 Visual-only Strawberry Elephant (client-side only)
+-- This just shows it; does NOT clone or affect the real server brainrot
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,211 +7,74 @@ local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
 
 local player = Players.LocalPlayer
-if not player then
-    warn("[Client] No LocalPlayer found.")
+
+-- references
+local models = ReplicatedStorage:WaitForChild("Models")
+local animals = models:WaitForChild("Animals")
+local anims = ReplicatedStorage:WaitForChild("Animations"):WaitForChild("Animals")
+
+local brainrotName = "Strawberry Elephant"
+local source = animals:FindFirstChild(brainrotName)
+if not source then
+    warn("Model not found for " .. brainrotName)
     return
 end
 
-local BRAINROT_NAME = "Strawberry Elephant"
-local TARGET_PLACEHOLDER_NAME = "Carpet" -- user said "in the carpet" so we try this first
+-- Instead of cloning, create a local “visual shell” (empty model)
+local visual = Instance.new("Model")
+visual.Name = brainrotName .. "_VisualOnly"
+visual.Parent = Workspace:FindFirstChild("RenderedMovingAnimals") or Workspace
 
--- helper to safely find children
-local function safeFind(parent, name)
-    if parent and parent.FindFirstChild then
-        return parent:FindFirstChild(name)
-    end
-    return nil
+-- copy just mesh and texture info (not actual Instance clone)
+for _, part in ipairs(source:GetDescendants()) do
+	if part:IsA("BasePart") then
+		local p = Instance.new("Part")
+		p.Name = part.Name
+		p.Size = part.Size
+		p.CFrame = part.CFrame
+		p.Color = part.Color
+		p.Material = part.Material
+		p.Transparency = part.Transparency
+		p.Anchored = true -- keeps it purely visual
+		p.CanCollide = false
+		p.Parent = visual
+	end
 end
 
--- get model & animations
-local modelsRoot = ReplicatedStorage:FindFirstChild("Models")
-local animalsFolder = modelsRoot and modelsRoot:FindFirstChild("Animals")
-local sourceModel = animalsFolder and animalsFolder:FindFirstChild(BRAINROT_NAME)
-if not sourceModel then
-    warn("[Client] Could not find source model at ReplicatedStorage.Models.Animals." .. tostring(BRAINROT_NAME))
-    return
-end
+-- place it in front of your character
+local char = player.Character or player.CharacterAdded:Wait()
+local hrp = char:WaitForChild("HumanoidRootPart")
+visual:PivotTo(hrp.CFrame * CFrame.new(0, 0, -10))
 
-local animsRoot = ReplicatedStorage:FindFirstChild("Animations")
-local animAnimals = animsRoot and animsRoot:FindFirstChild("Animals")
-local animFolder = animAnimals and animAnimals:FindFirstChild(BRAINROT_NAME)
-local idleAnim = animFolder and animFolder:FindFirstChild("Idle")
-local walkAnim = animFolder and animFolder:FindFirstChild("Walk")
-
--- ensure RenderedMovingAnimals exists
+-- simple movement like other RenderedMovingAnimals (straight Start→End loop if those exist)
 local rendered = Workspace:FindFirstChild("RenderedMovingAnimals")
-if not rendered then
-    rendered = Instance.new("Folder")
-    rendered.Name = "RenderedMovingAnimals"
-    rendered.Parent = Workspace
+local startPart = rendered and rendered:FindFirstChild("Start")
+local endPart = rendered and rendered:FindFirstChild("End")
+
+if startPart and endPart then
+	task.spawn(function()
+		local parts = visual:GetChildren()
+		while task.wait() do
+			-- move forward
+			for _, part in ipairs(parts) do
+				TweenService:Create(
+					part,
+					TweenInfo.new(10, Enum.EasingStyle.Linear),
+					{ CFrame = part.CFrame * CFrame.new((endPart.Position - startPart.Position).Unit * 100) }
+				):Play()
+			end
+			task.wait(10)
+			-- move backward
+			for _, part in ipairs(parts) do
+				TweenService:Create(
+					part,
+					TweenInfo.new(10, Enum.EasingStyle.Linear),
+					{ CFrame = part.CFrame * CFrame.new((startPart.Position - endPart.Position).Unit * 100) }
+				):Play()
+			end
+			task.wait(10)
+		end
+	end)
 end
 
--- find target placeholder: try named "Carpet", else try first child that looks like an animal (exclude Start/End/etc)
-local function findPlaceholder()
-    -- try explicit name first
-    local explicit = safeFind(rendered, TARGET_PLACEHOLDER_NAME)
-    if explicit then return explicit end
-
-    -- otherwise try to find first plausible animal model (skip helper parts like "Start","End","StartGround","Folder" etc)
-    for _,child in ipairs(rendered:GetChildren()) do
-        if child:IsA("Model") then
-            local nc = child.Name:lower()
-            if not (nc:find("start") or nc:find("end") or nc:find("startground") or nc:find("spawn") or nc:find("folder")) then
-                return child
-            end
-        elseif child:IsA("BasePart") then
-            -- if a BasePart named like an animal, return its parent if it's a model child
-            if child.Parent and child.Parent:IsA("Model") then
-                local pn = child.Parent.Name:lower()
-                if not (pn:find("start") or pn:find("end") or pn:find("startground")) then
-                    return child.Parent
-                end
-            end
-        end
-    end
-
-    -- fallback: return nil
-    return nil
-end
-
-local target = findPlaceholder()
-if not target then
-    warn("[Client] No placeholder/carpet or animal found under RenderedMovingAnimals to replace.")
-    return
-end
-
--- record target CFrame (try PrimaryPart or a BasePart)
-local targetPart = nil
-if target:IsA("Model") then
-    targetPart = target.PrimaryPart or target:FindFirstChildWhichIsA("BasePart")
-elseif target:IsA("BasePart") then
-    targetPart = target
-elseif target:IsA("Instance") then
-    -- last resort: try to find BasePart child
-    targetPart = target:FindFirstChildWhichIsA and target:FindFirstChildWhichIsA("BasePart")
-end
-
-if not targetPart then
-    warn("[Client] Could not determine placeholder's main part to anchor replacement.")
-    return
-end
-
-local spawnCFrame = targetPart.CFrame
-
--- remove the placeholder locally (client-only)
-pcall(function() target:Destroy() end)
-
--- clone Strawberry Elephant and parent to RenderedMovingAnimals
-local clone = sourceModel:Clone()
-clone.Name = BRAINROT_NAME .. "_ClientClone"
-clone.Parent = rendered
-
--- ensure a PrimaryPart exists and position clone at spawnCFrame
-if not clone.PrimaryPart then
-    clone.PrimaryPart = clone:FindFirstChild("HumanoidRootPart") or clone:FindFirstChildWhichIsA("BasePart")
-end
-if clone.PrimaryPart then
-    -- maintain orientation similar to the placeholder
-    clone:PivotTo(spawnCFrame)
-else
-    warn("[Client] Clone has no PrimaryPart; attempting to position by moving top-level parts.")
-    for _,p in ipairs(clone:GetChildren()) do
-        if p:IsA("BasePart") then
-            p.CFrame = spawnCFrame
-            break
-        end
-    end
-end
-
--- ensure it has a Humanoid and Animator to play animations (client-only)
-local humanoid = clone:FindFirstChildOfClass("Humanoid")
-if not humanoid then
-    humanoid = Instance.new("Humanoid")
-    humanoid.Parent = clone
-end
-local animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator", humanoid)
-
--- load animations if present
-local idleTrack, walkTrack
-if idleAnim then
-    local ok, track = pcall(function() return animator:LoadAnimation(idleAnim) end)
-    if ok then idleTrack = track end
-end
-if walkAnim then
-    local ok, track = pcall(function() return animator:LoadAnimation(walkAnim) end)
-    if ok then walkTrack = track end
-end
-
-if idleTrack then idleTrack:Play() end
-
--- Try to find Start and End under RenderedMovingAnimals (or nearby siblings)
-local startPart = rendered:FindFirstChild("Start")
-local endPart = rendered:FindFirstChild("End")
-local groundPart = rendered:FindFirstChild("StartGround") or rendered:FindFirstChild("Ground")
-
--- If Start/End not found directly under rendered, try workspace root (some games put them elsewhere)
-if not (startPart and endPart) then
-    startPart = Workspace:FindFirstChild("Start") or startPart
-    endPart = Workspace:FindFirstChild("End") or endPart
-end
-
--- Movement: If Start & End found, walk from Start -> End -> loop (matching the game's straight line behavior)
-local function startStraightPathMovement(rootPart)
-    if not (startPart and endPart) then
-        warn("[Client] Start/End not found, skipping straight-line movement fallback.")
-        return
-    end
-
-    -- compute spawn height offset relative to startPart
-    local yOffset = 0
-    if groundPart then
-        yOffset = (startPart.Position.Y - groundPart.Position.Y) * -1 -- if necessary, small adjust
-    end
-
-    task.spawn(function()
-        while clone and clone.Parent == rendered do
-            if not rootPart then break end
-
-            -- go Start -> End
-            local toEndCFrame = endPart.CFrame + Vector3.new(0, 0, 0)
-            if idleTrack and idleTrack.IsPlaying then idleTrack:Stop() end
-            if walkTrack then pcall(function() walkTrack:Play() end) end
-
-            local distance = (rootPart.Position - endPart.Position).Magnitude
-            local speed = 8 -- studs per second; tweak if needed to match other animals
-            local duration = math.max(0.5, distance / speed)
-
-            -- tween rootPart CFrame along straight line while maintaining orientation
-            local tween = TweenService:Create(rootPart, TweenInfo.new(duration, Enum.EasingStyle.Linear), { CFrame = toEndCFrame })
-            tween:Play()
-            tween.Completed:Wait()
-
-            if walkTrack then pcall(function() walkTrack:Stop() end) end
-            if idleTrack then pcall(function() idleTrack:Play() end) end
-
-            task.wait(1)
-
-            -- go End -> Start (back)
-            if walkTrack then pcall(function() walkTrack:Play() end) end
-            local tweenBack = TweenService:Create(rootPart, TweenInfo.new(duration, Enum.EasingStyle.Linear), { CFrame = startPart.CFrame })
-            tweenBack:Play()
-            tweenBack.Completed:Wait()
-
-            if walkTrack then pcall(function() walkTrack:Stop() end) end
-            if idleTrack then pcall(function() idleTrack:Play() end) end
-
-            task.wait(1)
-        end
-    end)
-end
-
--- Start movement (prefer using clone.PrimaryPart)
-if clone.PrimaryPart then
-    startStraightPathMovement(clone.PrimaryPart)
-else
-    -- try to find any BasePart to drive movement
-    local bp = clone:FindFirstChildWhichIsA("BasePart")
-    if bp then startStraightPathMovement(bp) end
-end
-
-print("[Client] Replaced placeholder with Strawberry Elephant (client-only). If Start/End exist, it will walk Start<->End.")
+print("[Client] Showing visual Strawberry Elephant only (no cloning, no server effect).")
