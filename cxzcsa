@@ -1,0 +1,97 @@
+-- 🍓 Client-Sided Animated Strawberry Elephant
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+
+local player = Players.LocalPlayer
+local brainrotName = "Strawberry Elephant"
+
+--// Get model
+local model = ReplicatedStorage:WaitForChild("Models"):WaitForChild("Animals"):FindFirstChild(brainrotName)
+if not model then
+    warn("Could not find model: " .. brainrotName)
+    return
+end
+
+--// Get animations
+local animFolder = ReplicatedStorage:WaitForChild("Animations"):WaitForChild("Animals"):FindFirstChild(brainrotName)
+if not animFolder then
+    warn("No animation folder for " .. brainrotName)
+    return
+end
+local idleAnim = animFolder:FindFirstChild("Idle")
+local walkAnim = animFolder:FindFirstChild("Walk")
+
+--// Make sure RenderedMovingAnimals exists
+local renderedFolder = Workspace:FindFirstChild("RenderedMovingAnimals")
+if not renderedFolder then
+    renderedFolder = Instance.new("Folder")
+    renderedFolder.Name = "RenderedMovingAnimals"
+    renderedFolder.Parent = Workspace
+end
+
+--// Clone and place near player
+local clone = model:Clone()
+clone.Name = brainrotName .. "_ClientClone"
+clone.Parent = renderedFolder
+
+local char = player.Character or player.CharacterAdded:Wait()
+local hrp = char:WaitForChild("HumanoidRootPart")
+clone:PivotTo(hrp.CFrame * CFrame.new(0, 0, -10))
+
+--// Setup PrimaryPart
+if not clone.PrimaryPart then
+    clone.PrimaryPart = clone:FindFirstChild("HumanoidRootPart") or clone:FindFirstChildWhichIsA("BasePart")
+end
+
+--// Animator setup
+local humanoid = clone:FindFirstChildOfClass("Humanoid")
+if not humanoid then
+    humanoid = Instance.new("Humanoid")
+    humanoid.Parent = clone
+end
+local animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator", humanoid)
+
+--// Load animations
+local idleTrack, walkTrack
+if idleAnim then idleTrack = animator:LoadAnimation(idleAnim) end
+if walkAnim then walkTrack = animator:LoadAnimation(walkAnim) end
+
+-- Play idle first
+if idleTrack then idleTrack:Play() end
+
+--// Random walking loop
+task.spawn(function()
+    while clone and clone.Parent == renderedFolder do
+        local root = clone.PrimaryPart
+        if not root then break end
+
+        -- Choose random direction
+        local randomOffset = Vector3.new(math.random(-40, 40), 0, math.random(-40, 40))
+        local targetCFrame = root.CFrame + randomOffset
+
+        -- Switch to walk anim
+        if walkTrack then
+            if idleTrack and idleTrack.IsPlaying then idleTrack:Stop() end
+            walkTrack:Play()
+        end
+
+        -- Tween to the new position
+        local tween = TweenService:Create(
+            root,
+            TweenInfo.new(math.random(4, 8), Enum.EasingStyle.Linear),
+            { CFrame = targetCFrame }
+        )
+        tween:Play()
+        tween.Completed:Wait()
+
+        -- Switch back to idle
+        if walkTrack and walkTrack.IsPlaying then walkTrack:Stop() end
+        if idleTrack then idleTrack:Play() end
+
+        task.wait(math.random(2, 4))
+    end
+end)
+
+print("[Client] ✅ Spawned animated Strawberry Elephant (local only)")
