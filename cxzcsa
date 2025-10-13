@@ -1,4 +1,4 @@
--- 🍓 Client-Sided Animated Strawberry Elephant
+-- 🍓 Client-Sided Straight-Line Strawberry Elephant
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -23,75 +23,83 @@ end
 local idleAnim = animFolder:FindFirstChild("Idle")
 local walkAnim = animFolder:FindFirstChild("Walk")
 
---// Make sure RenderedMovingAnimals exists
-local renderedFolder = Workspace:FindFirstChild("RenderedMovingAnimals")
-if not renderedFolder then
-    renderedFolder = Instance.new("Folder")
-    renderedFolder.Name = "RenderedMovingAnimals"
-    renderedFolder.Parent = Workspace
+--// Get RenderedMovingAnimals folder and reference parts
+local renderedFolder = Workspace:FindFirstChild("RenderedMovingAnimals") or Instance.new("Folder", Workspace)
+renderedFolder.Name = "RenderedMovingAnimals"
+
+local startPart = renderedFolder:FindFirstChild("Start")
+local endPart = renderedFolder:FindFirstChild("End")
+local groundPart = renderedFolder:FindFirstChild("StartGround")
+
+if not (startPart and endPart) then
+    warn("Start or End part missing under RenderedMovingAnimals.")
+    return
 end
 
---// Clone and place near player
+--// Clone and setup model
 local clone = model:Clone()
 clone.Name = brainrotName .. "_ClientClone"
 clone.Parent = renderedFolder
 
-local char = player.Character or player.CharacterAdded:Wait()
-local hrp = char:WaitForChild("HumanoidRootPart")
-clone:PivotTo(hrp.CFrame * CFrame.new(0, 0, -10))
+-- Adjust spawn height if needed
+local yOffset = 2
+if groundPart then
+    yOffset = (groundPart.Position.Y - startPart.Position.Y) + 2
+end
 
---// Setup PrimaryPart
+clone:PivotTo(startPart.CFrame + Vector3.new(0, yOffset, 0))
+
+-- Ensure PrimaryPart
 if not clone.PrimaryPart then
     clone.PrimaryPart = clone:FindFirstChild("HumanoidRootPart") or clone:FindFirstChildWhichIsA("BasePart")
 end
 
---// Animator setup
-local humanoid = clone:FindFirstChildOfClass("Humanoid")
-if not humanoid then
-    humanoid = Instance.new("Humanoid")
-    humanoid.Parent = clone
-end
+-- Add Humanoid + Animator for animations
+local humanoid = clone:FindFirstChildOfClass("Humanoid") or Instance.new("Humanoid", clone)
 local animator = humanoid:FindFirstChildOfClass("Animator") or Instance.new("Animator", humanoid)
 
---// Load animations
-local idleTrack, walkTrack
-if idleAnim then idleTrack = animator:LoadAnimation(idleAnim) end
-if walkAnim then walkTrack = animator:LoadAnimation(walkAnim) end
+-- Load animations
+local idleTrack = idleAnim and animator:LoadAnimation(idleAnim)
+local walkTrack = walkAnim and animator:LoadAnimation(walkAnim)
 
--- Play idle first
 if idleTrack then idleTrack:Play() end
 
---// Random walking loop
+--// Movement loop (walks from Start → End → Start repeatedly)
 task.spawn(function()
     while clone and clone.Parent == renderedFolder do
-        local root = clone.PrimaryPart
-        if not root then break end
+        if not (clone.PrimaryPart and startPart and endPart) then break end
 
-        -- Choose random direction
-        local randomOffset = Vector3.new(math.random(-40, 40), 0, math.random(-40, 40))
-        local targetCFrame = root.CFrame + randomOffset
-
-        -- Switch to walk anim
+        -- Play walk animation
         if walkTrack then
             if idleTrack and idleTrack.IsPlaying then idleTrack:Stop() end
             walkTrack:Play()
         end
 
-        -- Tween to the new position
-        local tween = TweenService:Create(
-            root,
-            TweenInfo.new(math.random(4, 8), Enum.EasingStyle.Linear),
-            { CFrame = targetCFrame }
-        )
-        tween:Play()
-        tween.Completed:Wait()
+        -- Tween from Start → End
+        local duration = (startPart.Position - endPart.Position).Magnitude / 10 -- speed factor
+        local tweenToEnd = TweenService:Create(clone.PrimaryPart, TweenInfo.new(duration, Enum.EasingStyle.Linear), { CFrame = endPart.CFrame + Vector3.new(0, yOffset, 0) })
+        tweenToEnd:Play()
+        tweenToEnd.Completed:Wait()
 
-        -- Switch back to idle
+        -- Play idle
         if walkTrack and walkTrack.IsPlaying then walkTrack:Stop() end
         if idleTrack then idleTrack:Play() end
+        task.wait(2)
 
-        task.wait(math.random(2, 4))
+        -- Walk back End → Start
+        if walkTrack then
+            if idleTrack and idleTrack.IsPlaying then idleTrack:Stop() end
+            walkTrack:Play()
+        end
+
+        local tweenToStart = TweenService:Create(clone.PrimaryPart, TweenInfo.new(duration, Enum.EasingStyle.Linear), { CFrame = startPart.CFrame + Vector3.new(0, yOffset, 0) })
+        tweenToStart:Play()
+        tweenToStart.Completed:Wait()
+
+        if walkTrack and walkTrack.IsPlaying then walkTrack:Stop() end
+        if idleTrack then idleTrack:Play() end
+        task.wait(2)
     end
 end)
 
-print("[Client] ✅ Spawned animated Strawberry Elephant (local only)")
+print("[Client] ✅ Spawned straight-line walking Strawberry Elephant (local only)")
